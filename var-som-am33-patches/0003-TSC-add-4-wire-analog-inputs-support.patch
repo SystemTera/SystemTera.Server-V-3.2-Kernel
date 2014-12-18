@@ -1,0 +1,125 @@
+From ce41392c47f25bbaf4656fe5a00339bda9a156aa Mon Sep 17 00:00:00 2001
+From: Uri Yosef <uri.y@variscite.com>
+Date: Tue, 4 Dec 2012 19:50:58 +0200
+Subject: [PATCH 3/9] TSC: add 4 wire analog inputs support
+
+---
+ drivers/input/touchscreen/ti_tsc.c | 27 +++++++++++++++++++++++----
+ drivers/mfd/ti_tscadc.c            | 10 +++++++++-
+ include/linux/mfd/ti_tscadc.h      |  3 +++
+ 3 files changed, 35 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/input/touchscreen/ti_tsc.c b/drivers/input/touchscreen/ti_tsc.c
+index 8b34598..7e32985 100644
+--- a/drivers/input/touchscreen/ti_tsc.c
++++ b/drivers/input/touchscreen/ti_tsc.c
+@@ -27,6 +27,7 @@
+ #include <linux/input/ti_tsc.h>
+ #include <linux/delay.h>
+ #include <linux/mfd/ti_tscadc.h>
++#include <asm/mach-types.h>
+ 
+ #define MAX_12BIT                       ((1 << 12) - 1)
+ 
+@@ -70,7 +71,13 @@ static void tsc_step_config(struct tscadc *ts_dev)
+ 
+ 	switch (ts_dev->wires) {
+ 	case 4:
+-		stepconfigx |= TSCADC_STEPCONFIG_INP_AN2 |
++#ifdef CONFIG_MACH_VAR_SOM_AM33
++		if (machine_is_var_som_am33())
++			stepconfigx |= TSCADC_STEPCONFIG_INP_AN1 |
++				TSCADC_STEPCONFIG_YPN;
++		else
++#endif
++			stepconfigx |= TSCADC_STEPCONFIG_INP_AN2 |
+ 				TSCADC_STEPCONFIG_XNN;
+ 		break;
+ 	case 5:
+@@ -95,7 +102,12 @@ static void tsc_step_config(struct tscadc *ts_dev)
+ 			TSCADC_STEPCONFIG_INM_ADCREFM;
+ 	switch (ts_dev->wires) {
+ 	case 4:
+-		stepconfigy |= TSCADC_STEPCONFIG_YPP;
++#ifdef CONFIG_MACH_VAR_SOM_AM33
++		if (machine_is_var_som_am33())
++			stepconfigy |= TSCADC_STEPCONFIG_XNP;
++		else
++#endif
++			stepconfigy |= TSCADC_STEPCONFIG_YPP;
+ 		break;
+ 	case 5:
+ 		stepconfigy |= TSCADC_STEPCONFIG_XPP |
+@@ -114,8 +126,15 @@ static void tsc_step_config(struct tscadc *ts_dev)
+ 
+ 	chargeconfig = TSCADC_STEPCONFIG_XPP | TSCADC_STEPCONFIG_YNN |
+ 			TSCADC_STEPCHARGE_RFP_XPUL |
+-			TSCADC_STEPCHARGE_RFM_XNUR |
+-			TSCADC_STEPCHARGE_INM_AN1 | TSCADC_STEPCHARGE_INP_AN1;
++			TSCADC_STEPCHARGE_RFM_XNUR;
++
++#ifdef CONFIG_MACH_VAR_SOM_AM33
++	if (machine_is_var_som_am33())
++		chargeconfig |= TSCADC_STEPCHARGE_INM_AN2 | TSCADC_STEPCHARGE_INP_AN2;
++	else
++		chargeconfig |= TSCADC_STEPCHARGE_INM_AN1 | TSCADC_STEPCHARGE_INP_AN1;
++#endif
++
+ 	tscadc_writel(ts_dev, TSCADC_REG_CHARGECONFIG, chargeconfig);
+ 	tscadc_writel(ts_dev, TSCADC_REG_CHARGEDELAY, TSCADC_CHARGEDLY_OPENDLY);
+ 
+diff --git a/drivers/mfd/ti_tscadc.c b/drivers/mfd/ti_tscadc.c
+index b833cea..1ef4653 100644
+--- a/drivers/mfd/ti_tscadc.c
++++ b/drivers/mfd/ti_tscadc.c
+@@ -24,6 +24,7 @@
+ #include <linux/mfd/ti_tscadc.h>
+ #include <linux/input/ti_tsc.h>
+ #include <linux/platform_data/ti_adc.h>
++#include <asm/mach-types.h>
+ 
+ static unsigned int tscadc_readl(struct ti_tscadc_dev *tsadc, unsigned int reg)
+ {
+@@ -41,7 +42,14 @@ static void tscadc_idle_config(struct ti_tscadc_dev *config)
+ 	unsigned int idleconfig;
+ 
+ 	idleconfig = TSCADC_STEPCONFIG_YNN | TSCADC_STEPCONFIG_INM_ADCREFM |
+-			TSCADC_STEPCONFIG_INP_ADCREFM | TSCADC_STEPCONFIG_YPN;
++			TSCADC_STEPCONFIG_INP_ADCREFM;
++
++#ifdef CONFIG_MACH_VAR_SOM_AM33
++	if (machine_is_var_som_am33())
++		idleconfig |= TSCADC_STEPCONFIG_XNN;
++	else
++#endif
++		idleconfig |= TSCADC_STEPCONFIG_YPN;
+ 
+ 	tscadc_writel(config, TSCADC_REG_IDLECONFIG, idleconfig);
+ }
+diff --git a/include/linux/mfd/ti_tscadc.h b/include/linux/mfd/ti_tscadc.h
+index 80fd69f..57a29d2 100644
+--- a/include/linux/mfd/ti_tscadc.h
++++ b/include/linux/mfd/ti_tscadc.h
+@@ -76,6 +76,7 @@
+ #define TSCADC_STEPCONFIG_INM_ADCREFM	TSCADC_STEPCONFIG_INM(8)
+ #define TSCADC_STEPCONFIG_INP_MASK	(0xF << 19)
+ #define TSCADC_STEPCONFIG_INP(val)	((val) << 19)
++#define TSCADC_STEPCONFIG_INP_AN1	TSCADC_STEPCONFIG_INP(1)
+ #define TSCADC_STEPCONFIG_INP_AN2	TSCADC_STEPCONFIG_INP(2)
+ #define TSCADC_STEPCONFIG_INP_AN3	TSCADC_STEPCONFIG_INP(3)
+ #define TSCADC_STEPCONFIG_INP_AN4	TSCADC_STEPCONFIG_INP(4)
+@@ -97,9 +98,11 @@
+ #define TSCADC_STEPCHARGE_INM_MASK	(0xF << 15)
+ #define TSCADC_STEPCHARGE_INM(val)	((val) << 15)
+ #define TSCADC_STEPCHARGE_INM_AN1	TSCADC_STEPCHARGE_INM(1)
++#define TSCADC_STEPCHARGE_INM_AN2	TSCADC_STEPCHARGE_INM(2)
+ #define TSCADC_STEPCHARGE_INP_MASK	(0xF << 19)
+ #define TSCADC_STEPCHARGE_INP(val)	((val) << 19)
+ #define TSCADC_STEPCHARGE_INP_AN1	TSCADC_STEPCHARGE_INP(1)
++#define TSCADC_STEPCHARGE_INP_AN2	TSCADC_STEPCHARGE_INP(2)
+ #define TSCADC_STEPCHARGE_RFM_MASK	(3 << 23)
+ #define TSCADC_STEPCHARGE_RFM(val)	((val) << 23)
+ #define TSCADC_STEPCHARGE_RFM_XNUR	TSCADC_STEPCHARGE_RFM(1)
+-- 
+1.8.5
+

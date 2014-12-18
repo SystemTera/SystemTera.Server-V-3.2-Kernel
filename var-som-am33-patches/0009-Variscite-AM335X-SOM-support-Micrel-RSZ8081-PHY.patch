@@ -1,0 +1,51 @@
+From 38658eb90b447756b3d45668838372ad1b60f02a Mon Sep 17 00:00:00 2001
+From: Uri Yosef <uri.y@variscite.com>
+Date: Mon, 10 Mar 2014 14:21:07 +0200
+Subject: [PATCH 9/9] Variscite AM335X SOM: support Micrel RSZ8081 PHY
+
+---
+ arch/arm/mach-omap2/board-var-som-am33.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/arch/arm/mach-omap2/board-var-som-am33.c b/arch/arm/mach-omap2/board-var-som-am33.c
+index 98a3b35..dd5be7a 100644
+--- a/arch/arm/mach-omap2/board-var-som-am33.c
++++ b/arch/arm/mach-omap2/board-var-som-am33.c
+@@ -964,6 +964,9 @@ static void mmc0_init(void)
+ #define VAR_SOM_KS8051_PHY_ID       0x00221556
+ #define VAR_SOM_KS8051_PHY_MASK     0xffffffff
+ 
++#define VAR_SOM_KS8081_PHY_ID       0x00221560
++#define VAR_SOM_KS8081_PHY_MASK     0xffffffff
++
+ #define VAR_SOM_KSZ9021_PHY_ID      0x00221611
+ #define VAR_SOM_KSZ9021_PHY_MASK    0xffffffff
+ 
+@@ -975,6 +978,14 @@ static int var_som_ks8051_phy_fixup(struct phy_device *phydev)
+ 	return 0;
+ }
+ 
++static int var_som_ks8081_phy_fixup(struct phy_device *phydev)
++{
++	/* override strap options, set RMII mode */
++	phy_write(phydev, 0x16, 0x2);
++
++	return 0;
++}
++
+ static int var_som_ksz9021_phy_fixup(struct phy_device *phydev)
+ {
+ 	/* Fine-tune clock and control pad skew */
+@@ -1010,6 +1021,9 @@ static void ethernet_init(void)
+ 	phy_register_fixup_for_uid(VAR_SOM_KS8051_PHY_ID, VAR_SOM_KS8051_PHY_MASK,
+ 				   var_som_ks8051_phy_fixup);
+ 
++	phy_register_fixup_for_uid(VAR_SOM_KS8081_PHY_ID, VAR_SOM_KS8081_PHY_MASK,
++				   var_som_ks8081_phy_fixup);
++
+ 	phy_register_fixup_for_uid(VAR_SOM_KSZ9021_PHY_ID, VAR_SOM_KSZ9021_PHY_MASK,
+ 				   var_som_ksz9021_phy_fixup);
+ 
+-- 
+1.8.5
+

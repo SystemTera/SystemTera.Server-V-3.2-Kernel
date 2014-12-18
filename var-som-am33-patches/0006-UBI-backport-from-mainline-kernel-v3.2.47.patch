@@ -1,0 +1,447 @@
+From e3de506da6b49a5d57b1b0623ae6a7491d6f25ce Mon Sep 17 00:00:00 2001
+From: Uri Yosef <uri.y@variscite.com>
+Date: Tue, 2 Jul 2013 10:59:38 +0300
+Subject: [PATCH 6/9] UBI: backport from mainline kernel v3.2.47
+
+---
+ drivers/mtd/ubi/build.c |  5 +++++
+ drivers/mtd/ubi/cdev.c  |  3 +++
+ drivers/mtd/ubi/debug.h |  5 ++++-
+ drivers/mtd/ubi/eba.c   |  6 ++++--
+ drivers/mtd/ubi/scan.c  | 10 +++++-----
+ drivers/mtd/ubi/ubi.h   |  2 ++
+ drivers/mtd/ubi/vtbl.c  |  6 +++---
+ drivers/mtd/ubi/wl.c    | 22 ++++++++++++----------
+ fs/ubifs/debug.h        | 17 +++++++++--------
+ fs/ubifs/find.c         | 12 ++++++++++--
+ fs/ubifs/lprops.c       |  6 ++++++
+ fs/ubifs/orphan.c       |  5 ++++-
+ fs/ubifs/super.c        | 12 ++++++------
+ fs/ubifs/ubifs.h        |  5 +++++
+ 14 files changed, 78 insertions(+), 38 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index 6c3fb5a..1f9c363 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -816,6 +816,11 @@ static int autoresize(struct ubi_device *ubi, int vol_id)
+ 	struct ubi_volume *vol = ubi->volumes[vol_id];
+ 	int err, old_reserved_pebs = vol->reserved_pebs;
+ 
++	if (ubi->ro_mode) {
++		ubi_warn("skip auto-resize because of R/O mode");
++		return 0;
++	}
++
+ 	/*
+ 	 * Clear the auto-resize flag in the volume in-memory copy of the
+ 	 * volume table, and 'ubi_resize_volume()' will propagate this change
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 3320a50..ad76592 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -632,6 +632,9 @@ static int verify_mkvol_req(const struct ubi_device *ubi,
+ 	if (req->alignment != 1 && n)
+ 		goto bad;
+ 
++	if (!req->name[0] || !req->name_len)
++		goto bad;
++
+ 	if (req->name_len > UBI_VOL_NAME_MAX) {
+ 		err = -ENAMETOOLONG;
+ 		goto bad;
+diff --git a/drivers/mtd/ubi/debug.h b/drivers/mtd/ubi/debug.h
+index 64fbb00..ead2cd1 100644
+--- a/drivers/mtd/ubi/debug.h
++++ b/drivers/mtd/ubi/debug.h
+@@ -43,7 +43,10 @@
+ 	pr_debug("UBI DBG " type ": " fmt "\n", ##__VA_ARGS__)
+ 
+ /* Just a debugging messages not related to any specific UBI subsystem */
+-#define dbg_msg(fmt, ...) ubi_dbg_msg("msg", fmt, ##__VA_ARGS__)
++#define dbg_msg(fmt, ...)                                    \
++	printk(KERN_DEBUG "UBI DBG (pid %d): %s: " fmt "\n", \
++	       current->pid, __func__, ##__VA_ARGS__)
++
+ /* General debugging messages */
+ #define dbg_gen(fmt, ...) ubi_dbg_msg("gen", fmt, ##__VA_ARGS__)
+ /* Messages from the eraseblock association sub-system */
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index fb7f19b..cd26da8 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -1028,12 +1028,14 @@ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 	 * 'ubi_wl_put_peb()' function on the @ubi->move_mutex. In turn, we are
+ 	 * holding @ubi->move_mutex and go sleep on the LEB lock. So, if the
+ 	 * LEB is already locked, we just do not move it and return
+-	 * %MOVE_CANCEL_RACE, which means that UBI will re-try, but later.
++	 * %MOVE_RETRY. Note, we do not return %MOVE_CANCEL_RACE here because
++	 * we do not know the reasons of the contention - it may be just a
++	 * normal I/O on this LEB, so we want to re-try.
+ 	 */
+ 	err = leb_write_trylock(ubi, vol_id, lnum);
+ 	if (err) {
+ 		dbg_wl("contention on LEB %d:%d, cancel", vol_id, lnum);
+-		return MOVE_CANCEL_RACE;
++		return MOVE_RETRY;
+ 	}
+ 
+ 	/*
+diff --git a/drivers/mtd/ubi/scan.c b/drivers/mtd/ubi/scan.c
+index 0cb17d9..b2b62de 100644
+--- a/drivers/mtd/ubi/scan.c
++++ b/drivers/mtd/ubi/scan.c
+@@ -997,7 +997,7 @@ static int process_eb(struct ubi_device *ubi, struct ubi_scan_info *si,
+ 			return err;
+ 		goto adjust_mean_ec;
+ 	case UBI_IO_FF:
+-		if (ec_err)
++		if (ec_err || bitflips)
+ 			err = add_to_list(si, pnum, ec, 1, &si->erase);
+ 		else
+ 			err = add_to_list(si, pnum, ec, 0, &si->free);
+@@ -1174,7 +1174,7 @@ struct ubi_scan_info *ubi_scan(struct ubi_device *ubi)
+ 
+ 	ech = kzalloc(ubi->ec_hdr_alsize, GFP_KERNEL);
+ 	if (!ech)
+-		goto out_slab;
++		goto out_si;
+ 
+ 	vidh = ubi_zalloc_vid_hdr(ubi, GFP_KERNEL);
+ 	if (!vidh)
+@@ -1235,8 +1235,6 @@ out_vidh:
+ 	ubi_free_vid_hdr(ubi, vidh);
+ out_ech:
+ 	kfree(ech);
+-out_slab:
+-	kmem_cache_destroy(si->scan_leb_slab);
+ out_si:
+ 	ubi_scan_destroy_si(si);
+ 	return ERR_PTR(err);
+@@ -1325,7 +1323,9 @@ void ubi_scan_destroy_si(struct ubi_scan_info *si)
+ 		}
+ 	}
+ 
+-	kmem_cache_destroy(si->scan_leb_slab);
++	if (si->scan_leb_slab)
++		kmem_cache_destroy(si->scan_leb_slab);
++
+ 	kfree(si);
+ }
+ 
+diff --git a/drivers/mtd/ubi/ubi.h b/drivers/mtd/ubi/ubi.h
+index dc64c76..d51d75d 100644
+--- a/drivers/mtd/ubi/ubi.h
++++ b/drivers/mtd/ubi/ubi.h
+@@ -120,6 +120,7 @@ enum {
+  *                     PEB
+  * MOVE_CANCEL_BITFLIPS: canceled because a bit-flip was detected in the
+  *                       target PEB
++ * MOVE_RETRY: retry scrubbing the PEB
+  */
+ enum {
+ 	MOVE_CANCEL_RACE = 1,
+@@ -127,6 +128,7 @@ enum {
+ 	MOVE_TARGET_RD_ERR,
+ 	MOVE_TARGET_WR_ERR,
+ 	MOVE_CANCEL_BITFLIPS,
++	MOVE_RETRY,
+ };
+ 
+ /**
+diff --git a/drivers/mtd/ubi/vtbl.c b/drivers/mtd/ubi/vtbl.c
+index 9ad18da..95b29f5 100644
+--- a/drivers/mtd/ubi/vtbl.c
++++ b/drivers/mtd/ubi/vtbl.c
+@@ -306,7 +306,7 @@ static int create_vtbl(struct ubi_device *ubi, struct ubi_scan_info *si,
+ 		       int copy, void *vtbl)
+ {
+ 	int err, tries = 0;
+-	static struct ubi_vid_hdr *vid_hdr;
++	struct ubi_vid_hdr *vid_hdr;
+ 	struct ubi_scan_leb *new_seb;
+ 
+ 	ubi_msg("create volume table (copy #%d)", copy + 1);
+@@ -346,7 +346,7 @@ retry:
+ 	 */
+ 	err = ubi_scan_add_used(ubi, si, new_seb->pnum, new_seb->ec,
+ 				vid_hdr, 0);
+-	kfree(new_seb);
++	kmem_cache_free(si->scan_leb_slab, new_seb);
+ 	ubi_free_vid_hdr(ubi, vid_hdr);
+ 	return err;
+ 
+@@ -359,7 +359,7 @@ write_error:
+ 		list_add(&new_seb->u.list, &si->erase);
+ 		goto retry;
+ 	}
+-	kfree(new_seb);
++	kmem_cache_free(si->scan_leb_slab, new_seb);
+ out_free:
+ 	ubi_free_vid_hdr(ubi, vid_hdr);
+ 	return err;
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index 42c684c..cf42971 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -389,7 +389,7 @@ static struct ubi_wl_entry *find_wl_entry(struct rb_root *root, int max)
+  */
+ int ubi_wl_get_peb(struct ubi_device *ubi, int dtype)
+ {
+-	int err, medium_ec;
++	int err;
+ 	struct ubi_wl_entry *e, *first, *last;
+ 
+ 	ubi_assert(dtype == UBI_LONGTERM || dtype == UBI_SHORTTERM ||
+@@ -427,7 +427,7 @@ retry:
+ 		 * For unknown data we pick a physical eraseblock with medium
+ 		 * erase counter. But we by no means can pick a physical
+ 		 * eraseblock with erase counter greater or equivalent than the
+-		 * lowest erase counter plus %WL_FREE_MAX_DIFF.
++		 * lowest erase counter plus %WL_FREE_MAX_DIFF/2.
+ 		 */
+ 		first = rb_entry(rb_first(&ubi->free), struct ubi_wl_entry,
+ 					u.rb);
+@@ -436,10 +436,8 @@ retry:
+ 		if (last->ec - first->ec < WL_FREE_MAX_DIFF)
+ 			e = rb_entry(ubi->free.rb_node,
+ 					struct ubi_wl_entry, u.rb);
+-		else {
+-			medium_ec = (first->ec + WL_FREE_MAX_DIFF)/2;
+-			e = find_wl_entry(&ubi->free, medium_ec);
+-		}
++		else
++			e = find_wl_entry(&ubi->free, WL_FREE_MAX_DIFF/2);
+ 		break;
+ 	case UBI_SHORTTERM:
+ 		/*
+@@ -795,7 +793,10 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 			protect = 1;
+ 			goto out_not_moved;
+ 		}
+-
++		if (err == MOVE_RETRY) {
++			scrubbing = 1;
++			goto out_not_moved;
++		}
+ 		if (err == MOVE_CANCEL_BITFLIPS || err == MOVE_TARGET_WR_ERR ||
+ 		    err == MOVE_TARGET_RD_ERR) {
+ 			/*
+@@ -1049,7 +1050,6 @@ static int erase_worker(struct ubi_device *ubi, struct ubi_work *wl_wrk,
+ 
+ 	ubi_err("failed to erase PEB %d, error %d", pnum, err);
+ 	kfree(wl_wrk);
+-	kmem_cache_free(ubi_wl_entry_slab, e);
+ 
+ 	if (err == -EINTR || err == -ENOMEM || err == -EAGAIN ||
+ 	    err == -EBUSY) {
+@@ -1062,14 +1062,16 @@ static int erase_worker(struct ubi_device *ubi, struct ubi_work *wl_wrk,
+ 			goto out_ro;
+ 		}
+ 		return err;
+-	} else if (err != -EIO) {
++	}
++
++	kmem_cache_free(ubi_wl_entry_slab, e);
++	if (err != -EIO)
+ 		/*
+ 		 * If this is not %-EIO, we have no idea what to do. Scheduling
+ 		 * this physical eraseblock for erasure again would cause
+ 		 * errors again and again. Well, lets switch to R/O mode.
+ 		 */
+ 		goto out_ro;
+-	}
+ 
+ 	/* It is %-EIO, the PEB went bad */
+ 
+diff --git a/fs/ubifs/debug.h b/fs/ubifs/debug.h
+index 8d9c468..c9d2941 100644
+--- a/fs/ubifs/debug.h
++++ b/fs/ubifs/debug.h
+@@ -175,22 +175,23 @@ const char *dbg_key_str1(const struct ubifs_info *c,
+ 			 const union ubifs_key *key);
+ 
+ /*
+- * DBGKEY macros require @dbg_lock to be held, which it is in the dbg message
+- * macros.
++ * TODO: these macros are now broken because there is no locking around them
++ * and we use a global buffer for the key string. This means that in case of
++ * concurrent execution we will end up with incorrect and messy key strings.
+  */
+ #define DBGKEY(key) dbg_key_str0(c, (key))
+ #define DBGKEY1(key) dbg_key_str1(c, (key))
+ 
+ extern spinlock_t dbg_lock;
+ 
+-#define ubifs_dbg_msg(type, fmt, ...) do {                        \
+-	spin_lock(&dbg_lock);                                     \
+-	pr_debug("UBIFS DBG " type ": " fmt "\n", ##__VA_ARGS__); \
+-	spin_unlock(&dbg_lock);                                   \
+-} while (0)
++#define ubifs_dbg_msg(type, fmt, ...) \
++	pr_debug("UBIFS DBG " type ": " fmt "\n", ##__VA_ARGS__)
+ 
+ /* Just a debugging messages not related to any specific UBIFS subsystem */
+-#define dbg_msg(fmt, ...)   ubifs_dbg_msg("msg", fmt, ##__VA_ARGS__)
++#define dbg_msg(fmt, ...)                                                     \
++	printk(KERN_DEBUG "UBIFS DBG (pid %d): %s: " fmt "\n", current->pid,  \
++	       __func__, ##__VA_ARGS__)
++
+ /* General messages */
+ #define dbg_gen(fmt, ...)   ubifs_dbg_msg("gen", fmt, ##__VA_ARGS__)
+ /* Additional journal messages */
+diff --git a/fs/ubifs/find.c b/fs/ubifs/find.c
+index 2559d17..5dc48ca 100644
+--- a/fs/ubifs/find.c
++++ b/fs/ubifs/find.c
+@@ -681,8 +681,16 @@ int ubifs_find_free_leb_for_idx(struct ubifs_info *c)
+ 	if (!lprops) {
+ 		lprops = ubifs_fast_find_freeable(c);
+ 		if (!lprops) {
+-			ubifs_assert(c->freeable_cnt == 0);
+-			if (c->lst.empty_lebs - c->lst.taken_empty_lebs > 0) {
++			/*
++			 * The first condition means the following: go scan the
++			 * LPT if there are uncategorized lprops, which means
++			 * there may be freeable LEBs there (UBIFS does not
++			 * store the information about freeable LEBs in the
++			 * master node).
++			 */
++			if (c->in_a_category_cnt != c->main_lebs ||
++			    c->lst.empty_lebs - c->lst.taken_empty_lebs > 0) {
++				ubifs_assert(c->freeable_cnt == 0);
+ 				lprops = scan_for_leb_for_idx(c);
+ 				if (IS_ERR(lprops)) {
+ 					err = PTR_ERR(lprops);
+diff --git a/fs/ubifs/lprops.c b/fs/ubifs/lprops.c
+index f8a181e..ea9d491 100644
+--- a/fs/ubifs/lprops.c
++++ b/fs/ubifs/lprops.c
+@@ -300,8 +300,11 @@ void ubifs_add_to_cat(struct ubifs_info *c, struct ubifs_lprops *lprops,
+ 	default:
+ 		ubifs_assert(0);
+ 	}
++
+ 	lprops->flags &= ~LPROPS_CAT_MASK;
+ 	lprops->flags |= cat;
++	c->in_a_category_cnt += 1;
++	ubifs_assert(c->in_a_category_cnt <= c->main_lebs);
+ }
+ 
+ /**
+@@ -334,6 +337,9 @@ static void ubifs_remove_from_cat(struct ubifs_info *c,
+ 	default:
+ 		ubifs_assert(0);
+ 	}
++
++	c->in_a_category_cnt -= 1;
++	ubifs_assert(c->in_a_category_cnt >= 0);
+ }
+ 
+ /**
+diff --git a/fs/ubifs/orphan.c b/fs/ubifs/orphan.c
+index c542c73..f9c90b5 100644
+--- a/fs/ubifs/orphan.c
++++ b/fs/ubifs/orphan.c
+@@ -130,13 +130,14 @@ void ubifs_delete_orphan(struct ubifs_info *c, ino_t inum)
+ 		else if (inum > o->inum)
+ 			p = p->rb_right;
+ 		else {
+-			if (o->dnext) {
++			if (o->del) {
+ 				spin_unlock(&c->orphan_lock);
+ 				dbg_gen("deleted twice ino %lu",
+ 					(unsigned long)inum);
+ 				return;
+ 			}
+ 			if (o->cnext) {
++				o->del = 1;
+ 				o->dnext = c->orph_dnext;
+ 				c->orph_dnext = o;
+ 				spin_unlock(&c->orphan_lock);
+@@ -447,6 +448,7 @@ static void erase_deleted(struct ubifs_info *c)
+ 		orphan = dnext;
+ 		dnext = orphan->dnext;
+ 		ubifs_assert(!orphan->new);
++		ubifs_assert(orphan->del);
+ 		rb_erase(&orphan->rb, &c->orph_tree);
+ 		list_del(&orphan->list);
+ 		c->tot_orphans -= 1;
+@@ -536,6 +538,7 @@ static int insert_dead_orphan(struct ubifs_info *c, ino_t inum)
+ 	rb_link_node(&orphan->rb, parent, p);
+ 	rb_insert_color(&orphan->rb, &c->orph_tree);
+ 	list_add_tail(&orphan->list, &c->orph_list);
++	orphan->del = 1;
+ 	orphan->dnext = c->orph_dnext;
+ 	c->orph_dnext = orphan;
+ 	dbg_mnt("ino %lu, new %d, tot %d", (unsigned long)inum,
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index ae0e76b..2f467e5 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -1583,6 +1583,12 @@ static int ubifs_remount_rw(struct ubifs_info *c)
+ 	c->remounting_rw = 1;
+ 	c->ro_mount = 0;
+ 
++	if (c->space_fixup) {
++		err = ubifs_fixup_free_space(c);
++		if (err)
++			return err;
++	}
++
+ 	err = check_free_space(c);
+ 	if (err)
+ 		goto out;
+@@ -1699,12 +1705,6 @@ static int ubifs_remount_rw(struct ubifs_info *c)
+ 		err = dbg_check_space_info(c);
+ 	}
+ 
+-	if (c->space_fixup) {
+-		err = ubifs_fixup_free_space(c);
+-		if (err)
+-			goto out;
+-	}
+-
+ 	mutex_unlock(&c->umount_mutex);
+ 	return err;
+ 
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 27f2255..a39fce5 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -908,6 +908,7 @@ struct ubifs_budget_req {
+  * @dnext: next orphan to delete
+  * @inum: inode number
+  * @new: %1 => added since the last commit, otherwise %0
++ * @del: %1 => delete pending, otherwise %0
+  */
+ struct ubifs_orphan {
+ 	struct rb_node rb;
+@@ -917,6 +918,7 @@ struct ubifs_orphan {
+ 	struct ubifs_orphan *dnext;
+ 	ino_t inum;
+ 	int new;
++	unsigned del:1;
+ };
+ 
+ /**
+@@ -1187,6 +1189,8 @@ struct ubifs_debug_info;
+  * @freeable_list: list of freeable non-index LEBs (free + dirty == @leb_size)
+  * @frdi_idx_list: list of freeable index LEBs (free + dirty == @leb_size)
+  * @freeable_cnt: number of freeable LEBs in @freeable_list
++ * @in_a_category_cnt: count of lprops which are in a certain category, which
++ *                     basically meants that they were loaded from the flash
+  *
+  * @ltab_lnum: LEB number of LPT's own lprops table
+  * @ltab_offs: offset of LPT's own lprops table
+@@ -1416,6 +1420,7 @@ struct ubifs_info {
+ 	struct list_head freeable_list;
+ 	struct list_head frdi_idx_list;
+ 	int freeable_cnt;
++	int in_a_category_cnt;
+ 
+ 	int ltab_lnum;
+ 	int ltab_offs;
+-- 
+1.8.5
+

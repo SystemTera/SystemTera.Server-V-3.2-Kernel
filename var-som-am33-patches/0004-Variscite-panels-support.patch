@@ -1,0 +1,65 @@
+From c00571bc467eaad72b7d6bec12aa3b3134df1564 Mon Sep 17 00:00:00 2001
+From: Uri Yosef <uri.y@variscite.com>
+Date: Tue, 4 Dec 2012 19:51:53 +0200
+Subject: [PATCH 4/9] Variscite panels support
+
+---
+ drivers/video/Kconfig    |  2 +-
+ drivers/video/da8xx-fb.c | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/video/Kconfig b/drivers/video/Kconfig
+index f66bf0e..f06259b 100644
+--- a/drivers/video/Kconfig
++++ b/drivers/video/Kconfig
+@@ -2240,7 +2240,7 @@ config FB_DA8XX
+ 
+ config FB_DA8XX_CONSISTENT_DMA_SIZE
+ 	int "Consistent DMA memory size (MB)"
+-	depends on (FB_DA8XX && MACH_AM335XEVM)
++	depends on (FB_DA8XX && (MACH_AM335XEVM || MACH_VAR_SOM_AM33))
+ 	range 1 14
+ 	default 4
+ 	help
+diff --git a/drivers/video/da8xx-fb.c b/drivers/video/da8xx-fb.c
+index 0d212dc..09e448d 100644
+--- a/drivers/video/da8xx-fb.c
++++ b/drivers/video/da8xx-fb.c
+@@ -290,6 +290,34 @@ static struct da8xx_panel known_lcd_panels[] = {
+ 		.pxl_clk = 9000000,
+ 		.invert_pxl_clk = 0,
+ 	},
++	/* Variscite Panel */
++	[4] = {
++		.name = "VAR-WVGA",
++		.width = 800,
++		.height = 480,
++		.hfp = 29,
++		.hbp = 17,
++		.hsw = 28,
++		.vfp = 13,
++		.vbp = 20,
++		.vsw = 3,
++		.pxl_clk = 28000000,
++		.invert_pxl_clk = 0,
++	},
++	/* Variscite CTW6120 Panel */
++	[5] = {
++		.name = "VAR-WVGA-CTW",
++		.width = 800,
++		.height = 480,
++		.hfp = 129,
++		.hbp = 28,
++		.hsw = 28,
++		.vfp = 32,
++		.vbp = 20,
++		.vsw = 3,
++		.pxl_clk = 33000000,
++		.invert_pxl_clk = 0,
++	},
+ };
+ 
+ static inline bool is_raster_enabled(void)
+-- 
+1.8.5
+

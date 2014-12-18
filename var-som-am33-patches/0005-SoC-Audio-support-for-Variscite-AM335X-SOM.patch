@@ -1,0 +1,55 @@
+From 0df861d3d5fe49816c8890a9e85eedf46b386f83 Mon Sep 17 00:00:00 2001
+From: Uri Yosef <uri.y@variscite.com>
+Date: Tue, 4 Dec 2012 19:52:36 +0200
+Subject: [PATCH 5/9] SoC Audio support for Variscite AM335X SOM
+
+---
+ sound/soc/davinci/davinci-evm.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/sound/soc/davinci/davinci-evm.c b/sound/soc/davinci/davinci-evm.c
+index fe1563c..2fd2d06 100644
+--- a/sound/soc/davinci/davinci-evm.c
++++ b/sound/soc/davinci/davinci-evm.c
+@@ -67,6 +67,9 @@ static int evm_hw_params(struct snd_pcm_substream *substream,
+ #endif
+ 			sysclk = 12000000;
+ 
++	else if (machine_is_var_som_am33())
++		sysclk = 24000000;
++
+ 	else
+ 		return -EINVAL;
+ 
+@@ -271,6 +274,17 @@ static struct snd_soc_dai_link am335x_evm_sk_dai = {
+ 	.ops = &evm_ops,
+ };
+ 
++static struct snd_soc_dai_link am335x_var_som_dai = {
++	.name = "TLV320AIC3X",
++	.stream_name = "AIC3X",
++	.cpu_dai_name = "davinci-mcasp.0",
++	.codec_dai_name = "tlv320aic3x-hifi",
++	.codec_name = "tlv320aic3x-codec.2-001b",
++	.platform_name = "davinci-pcm-audio",
++	.init = evm_aic3x_init,
++	.ops = &evm_ops,
++};
++
+ /* davinci dm6446 evm audio machine driver */
+ static struct snd_soc_card dm6446_snd_soc_card_evm = {
+ 	.name = "DaVinci DM6446 EVM",
+@@ -356,6 +370,10 @@ static int __init evm_init(void)
+ 			evm_snd_dev_data = &am335x_evm_sk_snd_soc_card;
+ #endif
+ 		index = 0;
++	} else if (machine_is_var_som_am33()) {
++		am335x_snd_soc_card.dai_link = &am335x_var_som_dai;
++		evm_snd_dev_data = &am335x_snd_soc_card;
++		index = 0;
+ 	} else
+ 		return -EINVAL;
+ 
+-- 
+1.8.5
+
