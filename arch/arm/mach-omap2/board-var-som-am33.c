@@ -478,6 +478,11 @@ static void setup_pin_mux(struct pinmux_config *pin_mux)
 		omap_mux_init_signal(pin_mux->string_name, pin_mux->val);
 }
 
+static struct pinmux_config function_key_pin_mux[] = {
+        {"uart1_ctsn.uart1_ctsn", OMAP_MUX_MODE7 | AM33XX_INPUT_EN},
+        {NULL, 0},
+};
+
 static void systemtera_serverv_init(void)
 {
         setup_pin_mux(knx_pin_mux);
@@ -486,6 +491,7 @@ static void systemtera_serverv_init(void)
         setup_pin_mux(eia485_pin_mux);
         setup_pin_mux(gpled_pin_mux);
         setup_pin_mux(misc_pin_mux);
+        setup_pin_mux(function_key_pin_mux);
 	printk ("SystemTera.Server.V initialized: 8xADC, 2xUSB-HOST, KNX, 8xIN, 2xOUT, EIA-485, 3xLED, COUNTER\n");
 }
 
@@ -560,7 +566,7 @@ static struct pinmux_config mmc1_wl12xx_pin_mux[] = {
 };
 
 static struct pinmux_config uart1_wl12xx_pin_mux[] = {
-	{"uart1_ctsn.uart1_ctsn", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+//	{"uart1_ctsn.uart1_ctsn", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
 	{"uart1_rtsn.uart1_rtsn", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
 	{"uart1_rxd.uart1_rxd", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
 	{"uart1_txd.uart1_txd", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL},
