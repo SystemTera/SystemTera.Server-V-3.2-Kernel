@@ -13,12 +13,15 @@
 #include <linux/kdev_t.h>
 #include <linux/types.h>
 #include <asm/uaccess.h>
+#include <linux/hardirq.h>
+#include <linux/interrupt.h>
 
 #include <linux/leds.h>
 #include <linux/timer.h>
 #include <linux/fs.h>
 #include <asm/gpio.h>
 #include <linux/slab.h>
+#include <linux/semaphore.h>
 #include "leds.h"
 
 #define GPIO_LED1_ROT           (2*32 + 25)     /* GPIO_2_25 - LCD_AC_BIAS_EN */
@@ -45,6 +48,7 @@ struct timer_data {
         struct timer_list timer;
 	int brightness;
         int led_info;
+	int running;
 };
 
 enum led_color {
@@ -168,6 +172,8 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t lengt
 		ledNr = (newState[0] - 48);
 		operation = (enum led_operation)(newState[2] - 48);
 		color = (enum led_color)(newState[4] - 48);
+
+		printk(KERN_INFO "Changing led %d %d %d", ledNr, operation, color);
 		
 		if((ledNr >= 0 && ledNr <= 2) && (operation >= 0 && operation <= 1) && (color >= 0 && color <= 3))
 		{
@@ -189,44 +195,64 @@ static struct file_operations fops = {
 };
 
 static void timer_func(unsigned long data) 
-{
-        struct timer_data *timer = (struct timer_data*)data;
-		
-		if(!timer)
-			return;
+{	
+	int is_in_int = 0;
+	struct timer_data *timer = (struct timer_data*)data;;
 
-		switch(leds[timer->led_info].color)
-		{
-			case LED_ORANGE:
-				 gpio_set_value(leds[timer->led_info].gpio_red, timer->brightness);
-				 gpio_set_value(leds[timer->led_info].gpio_green, timer->brightness);
-			break;
-			case LED_RED:
-				 gpio_set_value(leds[timer->led_info].gpio_red, timer->brightness);
-				 gpio_set_value(leds[timer->led_info].gpio_green, 1);
-			break;
-			case LED_GREEN:
-				gpio_set_value(leds[timer->led_info].gpio_green, timer->brightness);
-				 gpio_set_value(leds[timer->led_info].gpio_red, 1);
-			break;
-			case LED_COLOR_OFF:
-				 gpio_set_value(leds[timer->led_info].gpio_red, 1);
-				 gpio_set_value(leds[timer->led_info].gpio_green, 1);
-			break;
+	printk(KERN_INFO "timer_func");
+	if(in_interrupt()) {
+		printk(KERN_INFO "disable interrupts");
+		local_irq_disable();
+		is_in_int = 1;
+	}
+	
+
+	if(!timer)
+	{
+		if(is_in_int) {
+			printk(KERN_INFO "enable interrupts - timer is 0");
+			local_irq_enable();
 		}
 
-	        timer->brightness = !timer->brightness;
+		return;
+	}
+	switch(leds[timer->led_info].color)
+	{
+		case LED_ORANGE:
+			 gpio_set_value(leds[timer->led_info].gpio_red, timer->brightness);
+			 gpio_set_value(leds[timer->led_info].gpio_green, timer->brightness);
+			 printk(KERN_INFO "set ledi %d orange %d", timer->led_info, timer->brightness);
+		break;
+		case LED_RED:
+			 gpio_set_value(leds[timer->led_info].gpio_red, timer->brightness);
+			 gpio_set_value(leds[timer->led_info].gpio_green, 1);
+			 printk(KERN_INFO "set led %d red %d", timer->led_info, timer->brightness);
+		break;
+		case LED_GREEN:
+			gpio_set_value(leds[timer->led_info].gpio_green, timer->brightness);
+			gpio_set_value(leds[timer->led_info].gpio_red, 1);
+			printk(KERN_INFO "set led %d green %d", timer->led_info, timer->brightness);
+		break;
+		case LED_COLOR_OFF:
+			 gpio_set_value(leds[timer->led_info].gpio_red, 1);
+			 gpio_set_value(leds[timer->led_info].gpio_green, 1);
+			 printk(KERN_INFO "set led %d off %d", timer->led_info, timer->brightness);
+		break;
+	}
 
-		if(leds[timer->led_info].operation == LED_BLINK)
-		{
+
+	if(leds[timer->led_info].operation == LED_BLINK)
+	{
+		if(timer->running) {
 			mod_timer(&timer->timer, jiffies + 10);
+			timer->brightness = !timer->brightness;
 		}
-		else 
-		{
-			leds[timer->led_info].timer = 0;
-			del_timer_sync(&timer->timer);
-			kfree(timer);
-		}
+	}
+
+	if(is_in_int) {
+                printk(KERN_INFO "enable interrupts");
+                local_irq_enable();
+        }
 };
 
 void init_boot_leds(void) {
@@ -234,38 +260,46 @@ void init_boot_leds(void) {
 	state = 1;
 
 	for(i = 0; i < ARRAY_SIZE(leds); i++) {
+		struct timer_data *timer = kzalloc(sizeof(struct timer_data), GFP_KERNEL);
+		leds[i].timer = timer;
+		
+		timer->running = 1;
+		timer->led_info = i;
+		timer->brightness = 0;
+		timer->timer.function = timer_func;
+		timer->timer.data = (unsigned long)timer;
+
+		init_timer(&timer->timer);
+		add_timer(&timer->timer);
+
 		init_boot_led(i);
 	}
 };
 
 void init_boot_led(int i) {
 
-	struct timer_data *timer;
-	
-	if(leds[i].timer)
-	{
-		del_timer_sync(&leds[i].timer->timer);
-		kfree(leds[i].timer);
-		leds[i].timer = 0;
+	struct timer_data *timer = leds[i].timer;
+
+	if(leds[i].timer) {
+//		mod_timer(&timer->timer, -1);
+		timer->running = 0;
+	} else {
+		printk(KERN_INFO "Timer is 0");
 	}
 	
 	if(leds[i].color == LED_COLOR_OFF) {
 		gpio_set_value(leds[i].gpio_red, 1);
 		gpio_set_value(leds[i].gpio_green, 1);
+		timer->running = 0;
+		timer->brightness = 1;
+		printk(KERN_INFO "set led %d off", timer->led_info);
 	}
 	else {
-		timer = kzalloc(sizeof(struct timer_data), GFP_KERNEL);
-
 		if(!timer)
 			return;
-		timer->led_info=i;
-		timer->brightness = 0;
-		leds[i].timer = timer;
-		timer->timer.function = timer_func;
-		timer->timer.data = (unsigned long)timer;
-		init_timer(&timer->timer);
-		add_timer(&timer->timer);
-		
+		timer->brightness=0;
+		if(leds[timer->led_info].operation == LED_BLINK)
+			timer->running = 1;
 		timer_func((unsigned long)timer);
 	}
 };
