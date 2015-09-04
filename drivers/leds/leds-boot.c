@@ -33,6 +33,8 @@
 
 #define DEV_NAME "lc1"
 
+#define DEBUG
+
 static dev_t first;
 static struct cdev c_dev;
 static struct class *cl;
@@ -172,8 +174,9 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t lengt
 		ledNr = (newState[0] - 48);
 		operation = (enum led_operation)(newState[2] - 48);
 		color = (enum led_color)(newState[4] - 48);
-
+#ifdef DEBUG
 		printk(KERN_INFO "Changing led %d %d %d", ledNr, operation, color);
+#endif
 		
 		if((ledNr >= 0 && ledNr <= 2) && (operation >= 0 && operation <= 1) && (color >= 0 && color <= 3))
 		{
@@ -199,44 +202,51 @@ static void timer_func(unsigned long data)
 	int is_in_int = 0;
 	struct timer_data *timer = (struct timer_data*)data;;
 
-	printk(KERN_INFO "timer_func");
+	if(!timer) {
+#ifdef DEBUG
+		printk(KERN_INFO "returing timer_func -> timer is not set");
+#endif
+		return;
+	}
+
 	if(in_interrupt()) {
+#ifdef DEBUG
 		printk(KERN_INFO "disable interrupts");
+#endif
 		local_irq_disable();
 		is_in_int = 1;
 	}
 	
 
-	if(!timer)
-	{
-		if(is_in_int) {
-			printk(KERN_INFO "enable interrupts - timer is 0");
-			local_irq_enable();
-		}
-
-		return;
-	}
 	switch(leds[timer->led_info].color)
 	{
 		case LED_ORANGE:
 			 gpio_set_value(leds[timer->led_info].gpio_red, timer->brightness);
 			 gpio_set_value(leds[timer->led_info].gpio_green, timer->brightness);
+#ifdef DEBUG			
 			 printk(KERN_INFO "set ledi %d orange %d", timer->led_info, timer->brightness);
+#endif			 
 		break;
 		case LED_RED:
 			 gpio_set_value(leds[timer->led_info].gpio_red, timer->brightness);
 			 gpio_set_value(leds[timer->led_info].gpio_green, 1);
+#ifdef DEBUG
 			 printk(KERN_INFO "set led %d red %d", timer->led_info, timer->brightness);
+#endif
 		break;
 		case LED_GREEN:
 			gpio_set_value(leds[timer->led_info].gpio_green, timer->brightness);
 			gpio_set_value(leds[timer->led_info].gpio_red, 1);
+#ifdef DEBUG
 			printk(KERN_INFO "set led %d green %d", timer->led_info, timer->brightness);
+#endif
 		break;
 		case LED_COLOR_OFF:
 			 gpio_set_value(leds[timer->led_info].gpio_red, 1);
 			 gpio_set_value(leds[timer->led_info].gpio_green, 1);
+#ifdef DEBUG
 			 printk(KERN_INFO "set led %d off %d", timer->led_info, timer->brightness);
+#endif
 		break;
 	}
 
@@ -250,7 +260,9 @@ static void timer_func(unsigned long data)
 	}
 
 	if(is_in_int) {
+#ifdef DEBUG
                 printk(KERN_INFO "enable interrupts");
+#endif
                 local_irq_enable();
         }
 };
@@ -284,7 +296,9 @@ void init_boot_led(int i) {
 //		mod_timer(&timer->timer, -1);
 		timer->running = 0;
 	} else {
+#ifdef DEBUG
 		printk(KERN_INFO "Timer is 0");
+#endif
 	}
 	
 	if(leds[i].color == LED_COLOR_OFF) {
@@ -292,7 +306,9 @@ void init_boot_led(int i) {
 		gpio_set_value(leds[i].gpio_green, 1);
 		timer->running = 0;
 		timer->brightness = 1;
+#ifdef DEBUG
 		printk(KERN_INFO "set led %d off", timer->led_info);
+#endif
 	}
 	else {
 		if(!timer)
@@ -348,8 +364,8 @@ static int __init start_module(void) {
 		return -1;
 	}
 	init_boot_leds();
-	printk(KERN_INFO "Loading led-control module (c) BeKa-Software 2012 - 2013");
-	printk(KERN_INFO "Original written by Patrik Pfaffenbauer");
+	printk(KERN_INFO "Loading led-control module (c) BeKa-Software 2012 - 2015");
+	printk(KERN_INFO "Original written by Patrik Pfaffenbauer (www.github.com/p3root)");
 	return 0;
 };
 
