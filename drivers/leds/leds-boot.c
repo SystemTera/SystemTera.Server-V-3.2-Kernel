@@ -172,7 +172,7 @@ static ssize_t device_write(struct file *filep, const char *buffer, size_t lengt
 		ledNr = (newState[0] - 48);
 		operation = (enum led_operation)(newState[2] - 48);
 		color = (enum led_color)(newState[4] - 48);
-		printk(KERN_DEBUG "Changing led %d %d %d", ledNr, operation, color);
+		//printk(KERN_DEBUG "Changing led %d %d %d", ledNr, operation, color);
 		
 		if((ledNr >= 0 && ledNr <= 2) && (operation >= 0 && operation <= 1) && (color >= 0 && color <= 3))
 		{
@@ -199,12 +199,12 @@ static void timer_func(unsigned long data)
 	struct timer_data *timer = (struct timer_data*)data;;
 
 	if(!timer) {
-		printk(KERN_DEBUG "returing timer_func -> timer is not set");
+		//printk(KERN_DEBUG "returing timer_func -> timer is not set");
 		return;
 	}
 
 	if(in_interrupt()) {
-		printk(KERN_DEBUG "disable interrupts");
+		//printk(KERN_DEBUG "disable interrupts");
 		local_irq_disable();
 		is_in_int = 1;
 	}
@@ -215,22 +215,22 @@ static void timer_func(unsigned long data)
 		case LED_ORANGE:
 			 gpio_set_value(leds[timer->led_info].gpio_red, timer->brightness);
 			 gpio_set_value(leds[timer->led_info].gpio_green, timer->brightness);
-			 printk(KERN_DEBUG "set ledi %d orange %d", timer->led_info, timer->brightness);
+			 //printk(KERN_DEBUG "set ledi %d orange %d", timer->led_info, timer->brightness);
 		break;
 		case LED_RED:
 			 gpio_set_value(leds[timer->led_info].gpio_red, timer->brightness);
 			 gpio_set_value(leds[timer->led_info].gpio_green, 1);
-			 printk(KERN_DEBUG "set led %d red %d", timer->led_info, timer->brightness);
+			 //printk(KERN_DEBUG "set led %d red %d", timer->led_info, timer->brightness);
 		break;
 		case LED_GREEN:
 			gpio_set_value(leds[timer->led_info].gpio_green, timer->brightness);
 			gpio_set_value(leds[timer->led_info].gpio_red, 1);
-			printk(KERN_DEBUG "set led %d green %d", timer->led_info, timer->brightness);
+			//printk(KERN_DEBUG "set led %d green %d", timer->led_info, timer->brightness);
 		break;
 		case LED_COLOR_OFF:
 			 gpio_set_value(leds[timer->led_info].gpio_red, 1);
 			 gpio_set_value(leds[timer->led_info].gpio_green, 1);
-			 printk(KERN_DEBUG "set led %d off %d", timer->led_info, timer->brightness);
+			 //printk(KERN_DEBUG "set led %d off %d", timer->led_info, timer->brightness);
 		break;
 	}
 
@@ -244,7 +244,7 @@ static void timer_func(unsigned long data)
 	}
 
 	if(is_in_int) {
-                printk(KERN_DEBUG "enable interrupts");
+                //printk(KERN_DEBUG "enable interrupts");
                 local_irq_enable();
         }
 };
@@ -284,7 +284,7 @@ void init_boot_led(int i) {
 		gpio_set_value(leds[i].gpio_green, 1);
 		timer->running = 0;
 		timer->brightness = 1;
-		printk(KERN_DEBUG "set led %d off", timer->led_info);
+		//printk(KERN_DEBUG "set led %d off", timer->led_info);
 	}
 	else {
 		if(!timer)
